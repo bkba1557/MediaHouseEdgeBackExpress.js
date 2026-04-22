@@ -37,7 +37,18 @@ const upload = multer({
 // Upload media (admin only)
 router.post('/upload', authMiddleware, adminMiddleware, upload.single('file'), async (req, res) => {
   try {
-    const { title, description, type, category, url, thumbnail } = req.body;
+    const {
+      title,
+      description,
+      type,
+      category,
+      url,
+      thumbnail,
+      crew,
+      collectionKey,
+      collectionTitle,
+      sequence
+    } = req.body;
     const fileUrl = url || (req.file
       ? `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`
       : null);
@@ -46,6 +57,15 @@ router.post('/upload', authMiddleware, adminMiddleware, upload.single('file'), a
       return res.status(400).json({ message: 'File URL is required' });
     }
     
+    let parsedCrew = crew;
+    if (typeof parsedCrew === 'string') {
+      try {
+        parsedCrew = JSON.parse(parsedCrew);
+      } catch (_) {
+        parsedCrew = undefined;
+      }
+    }
+
     const media = new Media({
       title,
       description,
@@ -53,6 +73,10 @@ router.post('/upload', authMiddleware, adminMiddleware, upload.single('file'), a
       category,
       url: fileUrl,
       thumbnail,
+      crew: Array.isArray(parsedCrew) ? parsedCrew : undefined,
+      collectionKey,
+      collectionTitle,
+      sequence,
       uploadedBy: req.user.id
     });
     
@@ -90,6 +114,42 @@ router.get('/:id', async (req, res) => {
     await media.save();
     
     res.json(media);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// Update media metadata (admin only)
+router.patch('/:id', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const allowed = [
+      'title',
+      'description',
+      'type',
+      'category',
+      'url',
+      'thumbnail',
+      'crew',
+      'collectionKey',
+      'collectionTitle',
+      'sequence'
+    ];
+    const update = {};
+    for (const key of allowed) {
+      if (Object.prototype.hasOwnProperty.call(req.body, key)) {
+        update[key] = req.body[key];
+      }
+    }
+
+    const media = await Media.findByIdAndUpdate(req.params.id, update, {
+      new: true,
+    }).populate('uploadedBy', 'username');
+
+    if (!media) {
+      return res.status(404).json({ message: 'Media not found' });
+    }
+
+    res.json({ message: 'Media updated successfully', media });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

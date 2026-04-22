@@ -9,6 +9,9 @@ const ResponseSchema = new mongoose.Schema({
     type: String,
     required: true
   },
+  clientPhoneCountry: String,
+  clientPhoneDialCode: String,
+  clientPhoneNumber: String,
   message: {
     type: String,
     required: true
@@ -22,9 +25,11 @@ const ResponseSchema = new mongoose.Schema({
     min: 1,
     max: 5
   },
+  serviceCategory: String,
+  serviceTitle: String,
   status: {
     type: String,
-    enum: ['pending', 'replied', 'resolved'],
+    enum: ['pending', 'approved', 'rejected', 'replied', 'resolved'],
     default: 'pending'
   },
   adminReply: String,

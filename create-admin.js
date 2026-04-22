@@ -6,7 +6,7 @@ const User = require('./models/User');
 // Edit these values, then run: node create-admin.js
 const adminData = {
   username: 'admin',
-  email: 'mohamedaliarafat21@gmail.com',
+  email: 'dirmohamedallam@gmail.com',
   password: '123456',
 };
 

@@ -16,9 +16,35 @@ const MediaSchema = new mongoose.Schema({
     required: true
   },
   thumbnail: String,
+  crew: [
+    {
+      name: String,
+      role: String,
+      photoUrl: String
+    }
+  ],
+  collectionKey: String,
+  collectionTitle: String,
+  sequence: Number,
   category: {
     type: String,
-    enum: ['film', 'montage', 'advertisement', 'story'],
+    enum: [
+      'film',
+      'montage',
+      'advertisement',
+      'story',
+      'series_movies',
+      'ads_shooting',
+      'podcast',
+      'video_clip',
+      'art_production',
+      'platform_distribution',
+      'commercial_ads',
+      'global_events',
+      'media_coverage',
+      'audio_recordings',
+      'gov_partnership_ads'
+    ],
     default: 'film'
   },
   uploadedBy: {
