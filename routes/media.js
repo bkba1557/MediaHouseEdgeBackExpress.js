@@ -49,8 +49,12 @@ router.post('/upload', authMiddleware, adminMiddleware, upload.single('file'), a
       collectionTitle,
       sequence
     } = req.body;
+
+    const publicBaseUrl = (process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`)
+      .replace(/\/+$/, '');
+
     const fileUrl = url || (req.file
-      ? `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`
+      ? `${publicBaseUrl}/uploads/${req.file.filename}`
       : null);
 
     if (!fileUrl) {

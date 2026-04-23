@@ -55,6 +55,10 @@ require('dotenv').config();
 const app = express();
 const server = http.createServer(app);
 
+// When running behind Nginx/Cloudflare, trust proxy headers so `req.protocol`
+// reflects the original HTTPS scheme (X-Forwarded-Proto).
+app.set('trust proxy', true);
+
 const allowedOrigins = [
   'https://mediahouseedge.com',
   'https://www.mediahouseedge.com',
@@ -133,6 +137,8 @@ app.set('io', io);
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/media', require('./routes/media'));
 app.use('/api/responses', require('./routes/responses'));
+app.use('/api/team', require('./routes/team'));
+app.use('/api/about', require('./routes/about'));
 
 // 404 handler
 app.use((req, res) => {
