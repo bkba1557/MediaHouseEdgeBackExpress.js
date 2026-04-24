@@ -43,7 +43,11 @@ const MediaSchema = new mongoose.Schema({
       'global_events',
       'media_coverage',
       'audio_recordings',
-      'gov_partnership_ads'
+      'gov_partnership_ads',
+      'artist_contracts',
+      'behind_the_scenes',
+      'dj_booking',
+      'international_institutions'
     ],
     default: 'film'
   },

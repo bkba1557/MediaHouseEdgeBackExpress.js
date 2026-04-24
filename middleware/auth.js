@@ -16,6 +16,24 @@ const authMiddleware = (req, res, next) => {
   }
 };
 
+const optionalAuthMiddleware = (req, res, next) => {
+  const token = req.header('Authorization')?.replace('Bearer ', '');
+
+  if (!token) {
+    req.user = null;
+    return next();
+  }
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your_jwt_secret');
+    req.user = decoded;
+  } catch (err) {
+    req.user = null;
+  }
+
+  next();
+};
+
 const adminMiddleware = (req, res, next) => {
   if (req.user.role !== 'admin') {
     return res.status(403).json({ message: 'Access denied. Admin only.' });
@@ -23,4 +41,4 @@ const adminMiddleware = (req, res, next) => {
   next();
 };
 
-module.exports = { authMiddleware, adminMiddleware };
+module.exports = { authMiddleware, optionalAuthMiddleware, adminMiddleware };

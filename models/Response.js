@@ -1,5 +1,37 @@
 const mongoose = require('mongoose');
 
+const ResponseContractSchema = new mongoose.Schema(
+  {
+    title: {
+      type: String,
+      required: true,
+      trim: true
+    },
+    contractNumber: {
+      type: String,
+      trim: true
+    },
+    status: {
+      type: String,
+      enum: ['draft', 'active', 'signed', 'completed', 'cancelled'],
+      default: 'active'
+    },
+    description: {
+      type: String,
+      trim: true
+    },
+    documentUrl: {
+      type: String,
+      trim: true
+    },
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    }
+  },
+  { timestamps: true }
+);
+
 const ResponseSchema = new mongoose.Schema({
   clientName: {
     type: String,
@@ -27,6 +59,14 @@ const ResponseSchema = new mongoose.Schema({
   },
   serviceCategory: String,
   serviceTitle: String,
+  submittedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  contracts: {
+    type: [ResponseContractSchema],
+    default: []
+  },
   status: {
     type: String,
     enum: ['pending', 'approved', 'rejected', 'replied', 'resolved'],
