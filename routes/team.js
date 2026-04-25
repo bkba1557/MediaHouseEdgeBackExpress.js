@@ -21,7 +21,7 @@ function cleanStringList(value) {
     .filter((item) => item.length > 0);
 }
 
-function cleanPortfolio(value) {
+function cleanAssetList(value) {
   const parsed = parseMaybeJson(value);
   if (!Array.isArray(parsed)) return [];
 
@@ -157,7 +157,8 @@ router.post('/', authMiddleware, adminMiddleware, async (req, res) => {
       bio: (req.body.bio || '').toString().trim(),
       photoUrl: (req.body.photoUrl || '').toString().trim(),
       skills: cleanStringList(req.body.skills),
-      portfolio: cleanPortfolio(req.body.portfolio),
+      portfolio: cleanAssetList(req.body.portfolio),
+      certifications: cleanAssetList(req.body.certifications),
       order: toNumber(req.body.order, 0),
     });
 
@@ -188,7 +189,11 @@ router.patch('/:id', authMiddleware, adminMiddleware, async (req, res) => {
     }
 
     if (Object.prototype.hasOwnProperty.call(req.body, 'portfolio')) {
-      update.portfolio = cleanPortfolio(req.body.portfolio);
+      update.portfolio = cleanAssetList(req.body.portfolio);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, 'certifications')) {
+      update.certifications = cleanAssetList(req.body.certifications);
     }
 
     if (Object.prototype.hasOwnProperty.call(req.body, 'order')) {

@@ -5,6 +5,27 @@ const Media = require('../models/Media');
 const { authMiddleware, adminMiddleware } = require('../middleware/auth');
 
 const router = express.Router();
+const categoriesRequiringFolder = new Set([
+  'series_movies',
+  'artist_contracts',
+  'commercial_ads',
+]);
+
+function normalizeText(value) {
+  return (value || '').toString().trim();
+}
+
+function validateFolderFields(category, collectionKey, collectionTitle) {
+  if (!categoriesRequiringFolder.has(category)) {
+    return null;
+  }
+
+  if (!normalizeText(collectionKey) || !normalizeText(collectionTitle)) {
+    return 'Folder name is required for this category';
+  }
+
+  return null;
+}
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
@@ -50,6 +71,15 @@ router.post('/upload', authMiddleware, adminMiddleware, upload.single('file'), a
       sequence
     } = req.body;
 
+    const folderError = validateFolderFields(
+      category,
+      collectionKey,
+      collectionTitle,
+    );
+    if (folderError) {
+      return res.status(400).json({ message: folderError });
+    }
+
     const publicBaseUrl = (process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`)
       .replace(/\/+$/, '');
 
@@ -86,6 +116,43 @@ router.post('/upload', authMiddleware, adminMiddleware, upload.single('file'), a
     
     await media.save();
     res.json({ message: 'Media uploaded successfully', media });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.get('/folders', async (req, res) => {
+  try {
+    const category = normalizeText(req.query.category);
+    if (!category) {
+      return res.status(400).json({ message: 'Category is required' });
+    }
+
+    const mediaItems = await Media.find({ category }).sort({ createdAt: -1 });
+    const folders = new Map();
+
+    for (const item of mediaItems) {
+      const key = normalizeText(item.collectionKey);
+      const title = normalizeText(item.collectionTitle);
+      if (!key || !title) continue;
+
+      const existing = folders.get(key);
+      if (existing) {
+        existing.count += 1;
+        continue;
+      }
+
+      folders.set(key, {
+        collectionKey: key,
+        collectionTitle: title,
+        count: 1,
+        previewUrl:
+          normalizeText(item.thumbnail) ||
+          (item.type === 'image' ? normalizeText(item.url) : ''),
+      });
+    }
+
+    res.json(Array.from(folders.values()));
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -145,13 +212,34 @@ router.patch('/:id', authMiddleware, adminMiddleware, async (req, res) => {
       }
     }
 
+    const nextCategory = Object.prototype.hasOwnProperty.call(update, 'category')
+      ? update.category
+      : undefined;
+    const existingMedia = await Media.findById(req.params.id);
+    if (!existingMedia) {
+      return res.status(404).json({ message: 'Media not found' });
+    }
+
+    const resolvedCategory = normalizeText(nextCategory || existingMedia.category);
+    const resolvedCollectionKey = Object.prototype.hasOwnProperty.call(update, 'collectionKey')
+      ? update.collectionKey
+      : existingMedia.collectionKey;
+    const resolvedCollectionTitle = Object.prototype.hasOwnProperty.call(update, 'collectionTitle')
+      ? update.collectionTitle
+      : existingMedia.collectionTitle;
+
+    const folderError = validateFolderFields(
+      resolvedCategory,
+      resolvedCollectionKey,
+      resolvedCollectionTitle,
+    );
+    if (folderError) {
+      return res.status(400).json({ message: folderError });
+    }
+
     const media = await Media.findByIdAndUpdate(req.params.id, update, {
       new: true,
     }).populate('uploadedBy', 'username');
-
-    if (!media) {
-      return res.status(404).json({ message: 'Media not found' });
-    }
 
     res.json({ message: 'Media updated successfully', media });
   } catch (err) {

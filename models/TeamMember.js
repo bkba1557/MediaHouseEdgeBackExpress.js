@@ -103,6 +103,7 @@ const TeamMemberSchema = new mongoose.Schema(
       },
     ],
     portfolio: [PortfolioItemSchema],
+    certifications: [PortfolioItemSchema],
     order: {
       type: Number,
       default: 0,
