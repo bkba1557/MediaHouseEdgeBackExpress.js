@@ -6,6 +6,12 @@ const {
   optionalAuthMiddleware,
   adminMiddleware,
 } = require('../middleware/auth');
+const {
+  notifyAdminsAboutNewResponse,
+  notifyClientAboutReply,
+  notifyClientAboutStatus,
+  notifyClientAboutContract,
+} = require('../services/notificationService');
 
 const router = express.Router();
 
@@ -78,6 +84,11 @@ router.post('/submit', optionalAuthMiddleware, async (req, res) => {
     });
     
     await response.save();
+    try {
+      await notifyAdminsAboutNewResponse(response);
+    } catch (notificationError) {
+      console.error('Failed to notify admins about new response:', notificationError.message);
+    }
     res.json({ message: 'Response submitted successfully', response });
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -150,6 +161,12 @@ router.post('/status/:id', authMiddleware, adminMiddleware, async (req, res) => 
       return res.status(404).json({ message: 'Response not found' });
     }
 
+    try {
+      await notifyClientAboutStatus(response, status, req.user.id);
+    } catch (notificationError) {
+      console.error('Failed to notify client about status update:', notificationError.message);
+    }
+
     res.json({ message: 'Status updated successfully', response });
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -168,6 +185,12 @@ router.post('/reply/:id', authMiddleware, adminMiddleware, async (req, res) => {
     
     if (!response) {
       return res.status(404).json({ message: 'Response not found' });
+    }
+
+    try {
+      await notifyClientAboutReply(response, req.user.id);
+    } catch (notificationError) {
+      console.error('Failed to notify client about admin reply:', notificationError.message);
     }
     
     res.json({ message: 'Reply sent successfully', response });
@@ -233,6 +256,12 @@ router.post('/:id/contracts', authMiddleware, adminMiddleware, async (req, res) 
     await response.save();
     const contract = response.contracts[response.contracts.length - 1];
 
+    try {
+      await notifyClientAboutContract(response, contract, req.user.id, 'added');
+    } catch (notificationError) {
+      console.error('Failed to notify client about new contract:', notificationError.message);
+    }
+
     res.json({
       message: 'Contract added successfully',
       contract,
@@ -284,6 +313,12 @@ router.patch(
       }
 
       await response.save();
+
+      try {
+        await notifyClientAboutContract(response, contract, req.user.id, 'updated');
+      } catch (notificationError) {
+        console.error('Failed to notify client about updated contract:', notificationError.message);
+      }
 
       res.json({
         message: 'Contract updated successfully',

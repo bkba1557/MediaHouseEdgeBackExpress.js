@@ -139,6 +139,8 @@ app.use('/api/media', require('./routes/media'));
 app.use('/api/responses', require('./routes/responses'));
 app.use('/api/team', require('./routes/team'));
 app.use('/api/about', require('./routes/about'));
+app.use('/api/notifications', require('./routes/notifications'));
+app.use('/api/users', require('./routes/users'));
 
 // 404 handler
 app.use((req, res) => {
