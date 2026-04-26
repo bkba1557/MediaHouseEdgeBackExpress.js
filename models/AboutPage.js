@@ -52,6 +52,52 @@ const AboutSectionSchema = new mongoose.Schema(
   { _id: true }
 );
 
+const CompanyProfileSchema = new mongoose.Schema(
+  {
+    commercialRegister: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    taxNumber: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    addressAr: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    addressEn: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    phone: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    email: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    website: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    whatsapp: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+  },
+  { _id: false }
+);
+
 const AboutPageSchema = new mongoose.Schema(
   {
     heroTitle: {
@@ -68,6 +114,10 @@ const AboutPageSchema = new mongoose.Schema(
       type: String,
       default: '',
       trim: true,
+    },
+    companyProfile: {
+      type: CompanyProfileSchema,
+      default: () => ({}),
     },
     sections: [AboutSectionSchema],
     updatedBy: {

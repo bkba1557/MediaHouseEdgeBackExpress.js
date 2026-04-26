@@ -13,6 +13,10 @@ function parseMaybeJson(value) {
   }
 }
 
+function cleanText(value) {
+  return (value || '').toString().trim();
+}
+
 function cleanMediaList(value) {
   const parsed = parseMaybeJson(value);
   if (!Array.isArray(parsed)) return [];
@@ -21,11 +25,11 @@ function cleanMediaList(value) {
     .map((item) => (item && typeof item === 'object' ? item : null))
     .filter(Boolean)
     .map((item) => ({
-      title: (item.title || '').toString().trim(),
-      description: (item.description || '').toString().trim(),
-      type: (item.type || '').toString().trim().toLowerCase(),
-      url: (item.url || '').toString().trim(),
-      thumbnail: (item.thumbnail || '').toString().trim(),
+      title: cleanText(item.title),
+      description: cleanText(item.description),
+      type: cleanText(item.type).toLowerCase(),
+      url: cleanText(item.url),
+      thumbnail: cleanText(item.thumbnail),
     }))
     .filter((item) => item.url && ['image', 'video'].includes(item.type));
 }
@@ -37,11 +41,12 @@ function cleanSections(value) {
   return parsed
     .map((item, index) => {
       if (!item || typeof item !== 'object') return null;
-      const title = (item.title || '').toString().trim();
+      const title = cleanText(item.title);
       if (!title) return null;
+
       return {
         title,
-        body: (item.body || '').toString().trim(),
+        body: cleanText(item.body),
         order: Number.isFinite(Number(item.order)) ? Number(item.order) : index,
         media: cleanMediaList(item.media),
       };
@@ -49,11 +54,28 @@ function cleanSections(value) {
     .filter(Boolean);
 }
 
+function cleanCompanyProfile(value) {
+  const parsed = parseMaybeJson(value);
+  const source = parsed && typeof parsed === 'object' ? parsed : {};
+
+  return {
+    commercialRegister: cleanText(source.commercialRegister),
+    taxNumber: cleanText(source.taxNumber),
+    addressAr: cleanText(source.addressAr),
+    addressEn: cleanText(source.addressEn),
+    phone: cleanText(source.phone),
+    email: cleanText(source.email),
+    website: cleanText(source.website),
+    whatsapp: cleanText(source.whatsapp),
+  };
+}
+
 function emptyPage() {
   return {
     heroTitle: 'من نحن',
     heroSubtitle: '',
     intro: '',
+    companyProfile: {},
     sections: [],
   };
 }
@@ -70,9 +92,10 @@ router.get('/', async (req, res) => {
 router.put('/', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const payload = {
-      heroTitle: (req.body.heroTitle || 'من نحن').toString().trim(),
-      heroSubtitle: (req.body.heroSubtitle || '').toString().trim(),
-      intro: (req.body.intro || '').toString().trim(),
+      heroTitle: cleanText(req.body.heroTitle) || 'من نحن',
+      heroSubtitle: cleanText(req.body.heroSubtitle),
+      intro: cleanText(req.body.intro),
+      companyProfile: cleanCompanyProfile(req.body.companyProfile),
       sections: cleanSections(req.body.sections),
       updatedBy: req.user.id,
     };
