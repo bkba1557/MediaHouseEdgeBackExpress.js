@@ -70,6 +70,46 @@ function cleanCompanyProfile(value) {
   };
 }
 
+const allowedSocialTypes = new Set([
+  'facebook',
+  'instagram',
+  'x',
+  'linkedin',
+  'youtube',
+  'tiktok',
+  'snapchat',
+  'whatsapp',
+  'website',
+]);
+
+function cleanSocialLinks(value) {
+  const parsed = parseMaybeJson(value);
+  if (!Array.isArray(parsed)) return [];
+
+  return parsed
+    .map((item) => (item && typeof item === 'object' ? item : null))
+    .filter(Boolean)
+    .map((item) => ({
+      type: cleanText(item.type).toLowerCase(),
+      url: cleanText(item.url),
+    }))
+    .filter((item) => item.url && allowedSocialTypes.has(item.type));
+}
+
+function cleanSuccessPartners(value) {
+  const parsed = parseMaybeJson(value);
+  if (!Array.isArray(parsed)) return [];
+
+  return parsed
+    .map((item) => (item && typeof item === 'object' ? item : null))
+    .filter(Boolean)
+    .map((item) => ({
+      name: cleanText(item.name),
+      logoUrl: cleanText(item.logoUrl || item.logo),
+    }))
+    .filter((item) => item.name && item.logoUrl);
+}
+
 function emptyPage() {
   return {
     heroTitle: 'من نحن',
@@ -77,6 +117,8 @@ function emptyPage() {
     intro: '',
     companyProfile: {},
     sections: [],
+    socialLinks: [],
+    successPartners: [],
   };
 }
 
@@ -97,6 +139,8 @@ router.put('/', authMiddleware, adminMiddleware, async (req, res) => {
       intro: cleanText(req.body.intro),
       companyProfile: cleanCompanyProfile(req.body.companyProfile),
       sections: cleanSections(req.body.sections),
+      socialLinks: cleanSocialLinks(req.body.socialLinks),
+      successPartners: cleanSuccessPartners(req.body.successPartners),
       updatedBy: req.user.id,
     };
 

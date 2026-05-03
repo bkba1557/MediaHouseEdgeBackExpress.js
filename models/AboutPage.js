@@ -98,6 +98,49 @@ const CompanyProfileSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const SocialLinkSchema = new mongoose.Schema(
+  {
+    type: {
+      type: String,
+      enum: [
+        'facebook',
+        'instagram',
+        'x',
+        'linkedin',
+        'youtube',
+        'tiktok',
+        'snapchat',
+        'whatsapp',
+        'website',
+      ],
+      required: true,
+      trim: true,
+    },
+    url: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+  },
+  { _id: true }
+);
+
+const SuccessPartnerSchema = new mongoose.Schema(
+  {
+    name: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    logoUrl: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+  },
+  { _id: true }
+);
+
 const AboutPageSchema = new mongoose.Schema(
   {
     heroTitle: {
@@ -120,6 +163,8 @@ const AboutPageSchema = new mongoose.Schema(
       default: () => ({}),
     },
     sections: [AboutSectionSchema],
+    socialLinks: [SocialLinkSchema],
+    successPartners: [SuccessPartnerSchema],
     updatedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
