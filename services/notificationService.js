@@ -1,6 +1,7 @@
 const Notification = require('../models/Notification');
 const User = require('../models/User');
 const { getMessaging } = require('./firebaseAdmin');
+const nodemailer = require('nodemailer');
 
 const INVALID_TOKEN_ERROR_CODES = new Set([
   'messaging/invalid-registration-token',
@@ -22,6 +23,40 @@ function normalizeData(data = {}) {
     result[key] = value.toString();
     return result;
   }, {});
+}
+
+function getMailTransporter() {
+  if (!process.env.SMTP_USER || !process.env.SMTP_APP_PASSWORD) return null;
+
+  return nodemailer.createTransport({
+    host: process.env.SMTP_HOST || 'smtp.gmail.com',
+    port: Number(process.env.SMTP_PORT || 465),
+    secure: String(process.env.SMTP_SECURE || 'true') === 'true',
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_APP_PASSWORD,
+    },
+  });
+}
+
+async function sendEmail({ to, subject, text }) {
+  const recipients = Array.isArray(to)
+    ? to.map((value) => cleanText(value, { maxLength: 254 })).filter(Boolean)
+    : [cleanText(to, { maxLength: 254 })].filter(Boolean);
+  if (recipients.length === 0) return null;
+
+  const transporter = getMailTransporter();
+  if (!transporter) {
+    console.log(`Email skipped; SMTP is not configured. Subject: ${subject}`);
+    return null;
+  }
+
+  return transporter.sendMail({
+    from: process.env.SMTP_FROM || process.env.SMTP_USER,
+    to: recipients,
+    subject,
+    text,
+  });
 }
 
 function chunkArray(items, chunkSize) {
@@ -219,14 +254,14 @@ async function findUserByResponse(response) {
 }
 
 async function notifyAdminsAboutNewResponse(response) {
-  const admins = await User.find({ role: 'admin' }).select('_id fcmTokens');
+  const admins = await User.find({ role: 'admin' }).select('_id email fcmTokens');
   const isServiceRequest = Boolean(cleanText(response.serviceCategory));
   const requestLabel = cleanText(
     response.serviceTitle || response.serviceCategory || 'Service request',
     { maxLength: 160 }
   );
 
-  return createNotificationsForUsers({
+  const result = await createNotificationsForUsers({
     recipientIds: admins.map((user) => user._id),
     title: isServiceRequest ? 'New service request' : 'New client feedback',
     body: isServiceRequest
@@ -241,6 +276,22 @@ async function notifyAdminsAboutNewResponse(response) {
     },
     createdBy: response.submittedBy,
   });
+
+  if (isServiceRequest) {
+    await sendEmail({
+      to: admins.map((user) => user.email),
+      subject: 'New Media House Edge service access request',
+      text: [
+        `${cleanText(response.clientName, { maxLength: 80 })} submitted ${requestLabel}.`,
+        `Email: ${cleanText(response.clientEmail, { maxLength: 254 })}`,
+        `Phone: ${cleanText(response.clientPhoneDialCode)} ${cleanText(response.clientPhoneNumber)}`,
+        `Organization: ${cleanText(response.organizationName, { maxLength: 180 }) || '-'}`,
+        `Evidence: ${cleanText(response.evidenceUrl, { maxLength: 2048 }) || '-'}`,
+      ].join('\n'),
+    });
+  }
+
+  return result;
 }
 
 async function notifyClientAboutReply(response, actorId) {
@@ -276,7 +327,7 @@ async function notifyClientAboutStatus(response, status, actorId) {
   );
   const readableStatus = cleanText(status, { maxLength: 32 }) || response.status;
 
-  return createNotificationsForUsers({
+  const result = await createNotificationsForUsers({
     recipientIds: [user._id],
     title: 'Request status updated',
     body: `${requestLabel} is now ${readableStatus}.`,
@@ -289,6 +340,16 @@ async function notifyClientAboutStatus(response, status, actorId) {
     },
     createdBy: actorId,
   });
+
+  if (readableStatus === 'approved') {
+    await sendEmail({
+      to: user.email || response.clientEmail,
+      subject: 'Media House Edge service request approved',
+      text: `${requestLabel} has been approved. You can now access the service content from the app.`,
+    });
+  }
+
+  return result;
 }
 
 async function notifyClientAboutContract(response, contract, actorId, action = 'added') {

@@ -59,6 +59,8 @@ const ResponseSchema = new mongoose.Schema({
   },
   serviceCategory: String,
   serviceTitle: String,
+  organizationName: String,
+  evidenceUrl: String,
   submittedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'

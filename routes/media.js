@@ -4,9 +4,15 @@ const path = require('path');
 
 const Media = require('../models/Media');
 const MediaFolderConfig = require('../models/MediaFolderConfig');
-const { authMiddleware, adminMiddleware } = require('../middleware/auth');
+const Response = require('../models/Response');
+const User = require('../models/User');
+const { authMiddleware, optionalAuthMiddleware, adminMiddleware } = require('../middleware/auth');
 
 const router = express.Router();
+const restrictedCategories = new Set([
+  'gov_partnership_ads',
+  'international_institutions',
+]);
 const categoriesRequiringFolder = new Set([
   'series_movies',
   'artist_contracts',
@@ -26,6 +32,32 @@ const defaultFolderTitlesByCategory = {
 
 function normalizeText(value) {
   return (value || '').toString().trim();
+}
+
+async function userCanAccessCategory(req, category) {
+  const normalizedCategory = normalizeText(category);
+  if (!restrictedCategories.has(normalizedCategory)) return true;
+  if (!req.user || req.user.role === 'guest') return false;
+  if (req.user.role === 'admin') return true;
+
+  const user = await User.findById(req.user.id).select('email role').lean();
+  if (!user) return false;
+  if (user.role === 'admin') return true;
+
+  const ownership = [{ submittedBy: req.user.id }];
+  if (user.email) {
+    ownership.push({
+      clientEmail: new RegExp(`^${user.email.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'),
+    });
+  }
+
+  const approved = await Response.exists({
+    serviceCategory: normalizedCategory,
+    status: 'approved',
+    $or: ownership,
+  });
+
+  return Boolean(approved);
 }
 
 function buildCollectionKey(value) {
@@ -331,11 +363,15 @@ router.post(
   },
 );
 
-router.get('/folders', async (req, res) => {
+router.get('/folders', optionalAuthMiddleware, async (req, res) => {
   try {
     const category = normalizeText(req.query.category);
     if (!category) {
       return res.status(400).json({ message: 'Category is required' });
+    }
+
+    if (!(await userCanAccessCategory(req, category))) {
+      return res.status(403).json({ message: 'Service access is pending approval' });
     }
 
     const folders = await listFoldersForCategory(category);
@@ -423,12 +459,19 @@ router.patch(
 );
 
 // Get all media
-router.get('/all', async (req, res) => {
+router.get('/all', optionalAuthMiddleware, async (req, res) => {
   try {
     const { type, category } = req.query;
     const filter = {};
     if (type) filter.type = type;
-    if (category) filter.category = category;
+    if (category) {
+      if (!(await userCanAccessCategory(req, category))) {
+        return res.status(403).json({ message: 'Service access is pending approval' });
+      }
+      filter.category = category;
+    } else {
+      filter.category = { $nin: Array.from(restrictedCategories) };
+    }
 
     const media = await Media.find(filter)
       .sort({ createdAt: -1 })
@@ -440,7 +483,7 @@ router.get('/all', async (req, res) => {
 });
 
 // Get single media
-router.get('/:id', async (req, res) => {
+router.get('/:id', optionalAuthMiddleware, async (req, res) => {
   try {
     const media = await Media.findById(req.params.id).populate(
       'uploadedBy',
@@ -448,6 +491,10 @@ router.get('/:id', async (req, res) => {
     );
     if (!media) {
       return res.status(404).json({ message: 'Media not found' });
+    }
+
+    if (!(await userCanAccessCategory(req, media.category))) {
+      return res.status(403).json({ message: 'Service access is pending approval' });
     }
 
     media.views += 1;

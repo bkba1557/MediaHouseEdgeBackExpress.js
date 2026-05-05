@@ -1,4 +1,6 @@
 const express = require('express');
+const multer = require('multer');
+const path = require('path');
 const Response = require('../models/Response');
 const User = require('../models/User');
 const {
@@ -14,6 +16,27 @@ const {
 } = require('../services/notificationService');
 
 const router = express.Router();
+const evidenceStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, 'uploads/'),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname || '').toLowerCase();
+    cb(null, `${Date.now()}-evidence${ext}`);
+  },
+});
+const evidenceUpload = multer({
+  storage: evidenceStorage,
+  fileFilter: (req, file, cb) => {
+    const allowed = new Set([
+      'image/jpeg',
+      'image/png',
+      'image/gif',
+      'application/pdf',
+    ]);
+    if (allowed.has(file.mimetype)) return cb(null, true);
+    cb(new Error('Evidence must be an image or PDF'));
+  },
+  limits: { fileSize: 15 * 1024 * 1024 },
+});
 
 function buildKindFilter(kind) {
   const filter = {};
@@ -48,7 +71,7 @@ const allowedContractStatuses = new Set([
 ]);
 
 // Submit client response
-router.post('/submit', optionalAuthMiddleware, async (req, res) => {
+router.post('/submit', optionalAuthMiddleware, evidenceUpload.single('evidence'), async (req, res) => {
   try {
     const {
       clientName,
@@ -60,7 +83,8 @@ router.post('/submit', optionalAuthMiddleware, async (req, res) => {
       mediaId,
       rating,
       serviceCategory,
-      serviceTitle
+      serviceTitle,
+      organizationName
     } = req.body;
     const normalizedClientEmail = cleanText(clientEmail, {
       maxLength: 254,
@@ -69,6 +93,14 @@ router.post('/submit', optionalAuthMiddleware, async (req, res) => {
     const submittedBy =
       req.user && req.user.id && req.user.role !== 'guest' ? req.user.id : undefined;
     
+    const publicBaseUrl = (
+      process.env.PUBLIC_BASE_URL ||
+      `${req.protocol}://${req.get('host')}`
+    ).replace(/\/+$/, '');
+    const evidenceUrl = req.file
+      ? `${publicBaseUrl}/uploads/${req.file.filename}`
+      : cleanText(req.body.evidenceUrl, { maxLength: 2048 });
+
     const response = new Response({
       clientName: cleanText(clientName, { maxLength: 120 }),
       clientEmail: normalizedClientEmail,
@@ -80,6 +112,8 @@ router.post('/submit', optionalAuthMiddleware, async (req, res) => {
       rating,
       serviceCategory: cleanText(serviceCategory, { maxLength: 120 }),
       serviceTitle: cleanText(serviceTitle, { maxLength: 180 }),
+      organizationName: cleanText(organizationName, { maxLength: 180 }),
+      evidenceUrl,
       submittedBy
     });
     
