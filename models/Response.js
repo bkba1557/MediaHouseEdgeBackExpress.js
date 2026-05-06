@@ -70,6 +70,11 @@ const ResponseSchema = new mongoose.Schema({
   identityFrontUrl: String,
   identityBackUrl: String,
   passportUrl: String,
+  profileImageUrl: String,
+  workVideoUrls: {
+    type: [String],
+    default: []
+  },
   castingData: {
     type: mongoose.Schema.Types.Mixed,
     default: undefined

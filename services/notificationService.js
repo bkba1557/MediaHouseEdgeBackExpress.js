@@ -347,8 +347,8 @@ async function notifyAdminsAboutNewResponse(response) {
           { labelAr: 'البريد', labelEn: 'Email', value: cleanText(response.clientEmail, { maxLength: 254 }) },
           { labelAr: 'الجوال', labelEn: 'Phone', value: `${cleanText(response.clientPhoneDialCode)} ${cleanText(response.clientPhoneNumber)}`.trim() },
           { labelAr: 'الدولة', labelEn: 'Country', value: response.castingData?.country || response.clientPhoneCountry },
-          { labelAr: 'نوع الهوية', labelEn: 'ID Type', value: response.castingData?.identityType },
-          { labelAr: 'المرفق', labelEn: 'Attachment', value: cleanText(response.evidenceUrl, { maxLength: 2048 }) || response.identityFrontUrl || response.passportUrl },
+          { labelAr: 'الصورة الشخصية', labelEn: 'Profile Photo', value: response.profileImageUrl || response.castingData?.profileImageUrl },
+          { labelAr: 'فيديوهات الأعمال', labelEn: 'Work Videos', value: (response.workVideoUrls || response.castingData?.workVideoUrls || []).join('\n') },
         ],
       }),
     });

@@ -67,6 +67,14 @@ const castingUpload = evidenceUpload.fields([
   { name: 'passport', maxCount: 1 },
 ]);
 
+function cleanUrlList(value, { maxItems = 5 } = {}) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => cleanText(item, { maxLength: 2048 }))
+    .filter(Boolean)
+    .slice(0, maxItems);
+}
+
 function buildKindFilter(kind) {
   const filter = {};
 
@@ -222,15 +230,10 @@ router.post('/casting', authMiddleware, castingUpload, async (req, res) => {
     }
 
     const castingData = parseJsonField(req.body.castingData, {});
-    const identityType = cleanText(castingData.identityType, { maxLength: 32 });
-    const frontFile = req.files?.identityFront?.[0];
-    const backFile = req.files?.identityBack?.[0];
-    const passportFile = req.files?.passport?.[0];
-
-    if (identityType === 'passport') {
-      if (!passportFile) return res.status(400).json({ message: 'Passport image is required' });
-    } else if (!frontFile || !backFile) {
-      return res.status(400).json({ message: 'Front and back identity images are required' });
+    const profileImageUrl = cleanText(castingData.profileImageUrl, { maxLength: 2048 });
+    const workVideoUrls = cleanUrlList(castingData.workVideoUrls);
+    if (!profileImageUrl) {
+      return res.status(400).json({ message: 'Profile image is required' });
     }
 
     const castingNumber = await nextCastingNumber();
@@ -244,9 +247,8 @@ router.post('/casting', authMiddleware, castingUpload, async (req, res) => {
       serviceCategory: 'casting_application',
       serviceTitle: 'تقديم للكاستينج',
       castingNumber,
-      identityFrontUrl: publicUploadUrl(req, frontFile),
-      identityBackUrl: publicUploadUrl(req, backFile),
-      passportUrl: publicUploadUrl(req, passportFile),
+      profileImageUrl,
+      workVideoUrls,
       castingData,
       submittedBy: req.user.id,
       actionHistory: [
@@ -282,15 +284,16 @@ router.patch('/casting/:id', authMiddleware, castingUpload, async (req, res) => 
     }
 
     const castingData = parseJsonField(req.body.castingData, response.castingData || {});
+    const profileImageUrl = cleanText(castingData.profileImageUrl, { maxLength: 2048 });
+    const workVideoUrls = cleanUrlList(castingData.workVideoUrls);
     response.castingData = castingData;
     response.clientName = cleanText(castingData.name || response.clientName, { maxLength: 120 });
     response.clientPhoneCountry = cleanText(castingData.country || response.clientPhoneCountry, { maxLength: 120 });
     response.clientPhoneDialCode = cleanText(castingData.phoneDialCode || response.clientPhoneDialCode, { maxLength: 12 });
     response.clientPhoneNumber = cleanText(castingData.phoneNumber || response.clientPhoneNumber, { maxLength: 40 });
     response.message = cleanText(castingData.selfDescription || response.message);
-    response.identityFrontUrl = publicUploadUrl(req, req.files?.identityFront?.[0]) || response.identityFrontUrl;
-    response.identityBackUrl = publicUploadUrl(req, req.files?.identityBack?.[0]) || response.identityBackUrl;
-    response.passportUrl = publicUploadUrl(req, req.files?.passport?.[0]) || response.passportUrl;
+    response.profileImageUrl = profileImageUrl || response.profileImageUrl;
+    response.workVideoUrls = workVideoUrls;
     response.editRequested = false;
     if (response.status === 'needs_edit') response.status = 'pending';
     response.actionHistory.push({
