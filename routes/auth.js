@@ -24,6 +24,7 @@ const publicUser = (user) => ({
   email: user.email,
   role: user.role,
   customerTier: user.customerTier || 'regular',
+  accountType: user.accountType || 'client',
 });
 
 const createOtp = () => Math.floor(100000 + Math.random() * 900000).toString();
@@ -153,6 +154,7 @@ router.post('/register', [
     const username = req.body.username.trim();
     const email = normalizeEmail(req.body.email);
     const { password } = req.body;
+    const accountType = req.body.accountType === 'casting' ? 'casting' : 'client';
     
     let user = await User.findOne({
       $or: [{ username }, { email: new RegExp(`^${escapeRegExp(email)}$`, 'i') }],
@@ -166,6 +168,7 @@ router.post('/register', [
       email,
       password,
       role: 'client',
+      accountType,
     });
     
     res.json({ message: 'Verification code sent', requiresOtp: true });

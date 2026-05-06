@@ -50,6 +50,15 @@ const cors = require('cors');
 const path = require('path');
 const http = require('http');
 const { Server } = require('socket.io');
+const Response = require('./models/Response');
+const User = require('./models/User');
+const Counter = require('./models/Counter');
+const {
+  createNotificationsForUsers,
+  sendEmail,
+  buildBilingualEmailHtml,
+  formatRiyadhDateTime,
+} = require('./services/notificationService');
 require('dotenv').config();
 
 const app = express();
@@ -115,6 +124,10 @@ if (!MONGO_URI) {
 mongoose.connect(MONGO_URI)
   .then(() => {
     console.log('MongoDB connected');
+    ensureCastingNumbers().catch((error) => {
+      console.error('Failed to ensure casting numbers:', error.message);
+    });
+    startCastingAppointmentReminderJob();
   })
   .catch((err) => {
     console.error('MongoDB connection error:', err.message);
@@ -141,6 +154,108 @@ app.use('/api/team', require('./routes/team'));
 app.use('/api/about', require('./routes/about'));
 app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/users', require('./routes/users'));
+
+async function ensureCastingNumbers() {
+  const missing = await Response.find({
+    serviceCategory: 'casting_application',
+    $or: [
+      { castingNumber: { $exists: false } },
+      { castingNumber: null },
+      { castingNumber: '' },
+    ],
+  }).sort({ createdAt: 1 });
+
+  const numbered = await Response.find({
+    serviceCategory: 'casting_application',
+    castingNumber: /^MHE-\d{6}$/,
+  }).select('castingNumber');
+
+  let maxSequence = numbered.reduce((max, item) => {
+    const match = String(item.castingNumber || '').match(/^MHE-(\d{6})$/);
+    if (!match) return max;
+    return Math.max(max, Number(match[1]));
+  }, 0);
+
+  for (const request of missing) {
+    maxSequence += 1;
+    request.castingNumber = `MHE-${String(maxSequence).padStart(6, '0')}`;
+    request.actionHistory.push({
+      action: 'casting_number_assigned',
+      message: `Casting number assigned ${request.castingNumber}`,
+    });
+    await request.save();
+  }
+
+  await Counter.findOneAndUpdate(
+    { key: 'casting_application' },
+    { $max: { sequence: maxSequence } },
+    { upsert: true, setDefaultsOnInsert: true }
+  );
+}
+
+function startCastingAppointmentReminderJob() {
+  const intervalMs = 60 * 60 * 1000;
+  const run = async () => {
+    try {
+      const now = new Date();
+      const next24h = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+      const requests = await Response.find({
+        serviceCategory: 'casting_application',
+        status: 'approved',
+        appointmentAt: { $gte: now, $lte: next24h },
+        appointmentReminderSent: { $ne: true },
+      }).limit(50);
+
+      for (const request of requests) {
+        const user = request.submittedBy
+          ? await User.findById(request.submittedBy).select('_id email fcmTokens')
+          : await User.findOne({ email: request.clientEmail }).select('_id email fcmTokens');
+        if (!user) continue;
+
+        await createNotificationsForUsers({
+          recipientIds: [user._id],
+          title: 'Casting appointment reminder',
+          body: 'Your casting interview is scheduled within 24 hours.',
+          type: 'casting_appointment_reminder',
+          data: {
+            responseId: request._id,
+            appointmentAt: request.appointmentAt.toISOString(),
+            kind: 'service',
+          },
+        });
+
+        await sendEmail({
+          to: user.email || request.clientEmail,
+          subject: 'Media House Edge casting appointment reminder',
+          text: `Your casting interview is scheduled at ${formatRiyadhDateTime(request.appointmentAt)}.`,
+          html: buildBilingualEmailHtml({
+            titleAr: 'تذكير بموعد مقابلة الكاستينج',
+            titleEn: 'Casting Appointment Reminder',
+            bodyAr: 'موعد مقابلة الكاستينج الخاص بكم خلال 24 ساعة.',
+            bodyEn: 'Your casting interview is scheduled within 24 hours.',
+            details: [
+              { labelAr: 'رقم الطلب', labelEn: 'Request ID', value: request._id.toString() },
+              { labelAr: 'رقم القيد', labelEn: 'Casting Number', value: request.castingNumber },
+              { labelAr: 'الموعد', labelEn: 'Appointment', value: formatRiyadhDateTime(request.appointmentAt) },
+            ],
+          }),
+        });
+
+        request.appointmentReminderSent = true;
+        request.actionHistory.push({
+          action: 'appointment_reminder_sent',
+          message: 'Appointment reminder sent',
+        });
+        await request.save();
+      }
+    } catch (error) {
+      console.error('Casting appointment reminder job failed:', error.message);
+    }
+  };
+
+  setTimeout(run, 30 * 1000);
+  setInterval(run, intervalMs);
+}
 
 // 404 handler
 app.use((req, res) => {

@@ -59,8 +59,47 @@ const ResponseSchema = new mongoose.Schema({
   },
   serviceCategory: String,
   serviceTitle: String,
+  castingNumber: {
+    type: String,
+    unique: true,
+    sparse: true,
+    trim: true
+  },
   organizationName: String,
   evidenceUrl: String,
+  identityFrontUrl: String,
+  identityBackUrl: String,
+  passportUrl: String,
+  castingData: {
+    type: mongoose.Schema.Types.Mixed,
+    default: undefined
+  },
+  appointmentAt: Date,
+  appointmentReminderSent: {
+    type: Boolean,
+    default: false
+  },
+  editRequested: {
+    type: Boolean,
+    default: false
+  },
+  actionHistory: {
+    type: [
+      {
+        action: String,
+        message: String,
+        createdBy: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'User'
+        },
+        createdAt: {
+          type: Date,
+          default: Date.now
+        }
+      }
+    ],
+    default: []
+  },
   submittedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
@@ -71,7 +110,17 @@ const ResponseSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['pending', 'approved', 'rejected', 'replied', 'resolved'],
+    enum: [
+      'pending',
+      'approved',
+      'rejected',
+      'replied',
+      'resolved',
+      'needs_edit',
+      'qualified',
+      'unqualified',
+      'contract_released'
+    ],
     default: 'pending'
   },
   adminReply: String,

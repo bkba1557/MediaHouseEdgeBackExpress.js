@@ -3,6 +3,7 @@ const multer = require('multer');
 const path = require('path');
 const Response = require('../models/Response');
 const User = require('../models/User');
+const Counter = require('../models/Counter');
 const {
   authMiddleware,
   optionalAuthMiddleware,
@@ -12,7 +13,11 @@ const {
   notifyAdminsAboutNewResponse,
   notifyClientAboutReply,
   notifyClientAboutStatus,
+  notifyClientAboutCastingResult,
+  notifyClientAboutContractRelease,
   notifyClientAboutContract,
+  createNotificationsForUsers,
+  formatRiyadhDateTime,
 } = require('../services/notificationService');
 
 const router = express.Router();
@@ -26,17 +31,41 @@ const evidenceStorage = multer.diskStorage({
 const evidenceUpload = multer({
   storage: evidenceStorage,
   fileFilter: (req, file, cb) => {
-    const allowed = new Set([
+    const allowedMimeTypes = new Set([
       'image/jpeg',
+      'image/jpg',
       'image/png',
       'image/gif',
+      'image/webp',
+      'image/heic',
+      'image/heif',
       'application/pdf',
+      'application/octet-stream',
     ]);
-    if (allowed.has(file.mimetype)) return cb(null, true);
-    cb(new Error('Evidence must be an image or PDF'));
+    const allowedExtensions = new Set([
+      '.jpg',
+      '.jpeg',
+      '.png',
+      '.gif',
+      '.webp',
+      '.heic',
+      '.heif',
+      '.pdf',
+    ]);
+    const ext = path.extname(file.originalname || '').toLowerCase();
+    if (allowedMimeTypes.has(file.mimetype) && allowedExtensions.has(ext)) {
+      return cb(null, true);
+    }
+    cb(new Error('المرفق يجب أن يكون صورة أو PDF'));
   },
   limits: { fileSize: 15 * 1024 * 1024 },
 });
+
+const castingUpload = evidenceUpload.fields([
+  { name: 'identityFront', maxCount: 1 },
+  { name: 'identityBack', maxCount: 1 },
+  { name: 'passport', maxCount: 1 },
+]);
 
 function buildKindFilter(kind) {
   const filter = {};
@@ -60,6 +89,33 @@ function cleanText(value, { maxLength = 4000 } = {}) {
   const text = (value ?? '').toString().trim();
   if (!text) return '';
   return text.length > maxLength ? text.slice(0, maxLength) : text;
+}
+
+function publicUploadUrl(req, file) {
+  if (!file) return '';
+  const publicBaseUrl = (
+    process.env.PUBLIC_BASE_URL ||
+    `${req.protocol}://${req.get('host')}`
+  ).replace(/\/+$/, '');
+  return `${publicBaseUrl}/uploads/${file.filename}`;
+}
+
+function parseJsonField(value, fallback) {
+  if (typeof value !== 'string' || !value.trim()) return fallback;
+  try {
+    return JSON.parse(value);
+  } catch (_) {
+    return fallback;
+  }
+}
+
+async function nextCastingNumber() {
+  const counter = await Counter.findOneAndUpdate(
+    { key: 'casting_application' },
+    { $inc: { sequence: 1 } },
+    { new: true, upsert: true, setDefaultsOnInsert: true }
+  );
+  return `MHE-${String(counter.sequence).padStart(6, '0')}`;
 }
 
 const allowedContractStatuses = new Set([
@@ -114,7 +170,14 @@ router.post('/submit', optionalAuthMiddleware, evidenceUpload.single('evidence')
       serviceTitle: cleanText(serviceTitle, { maxLength: 180 }),
       organizationName: cleanText(organizationName, { maxLength: 180 }),
       evidenceUrl,
-      submittedBy
+      submittedBy,
+      actionHistory: [
+        {
+          action: 'created',
+          message: 'Request submitted',
+          createdBy: submittedBy,
+        },
+      ],
     });
     
     await response.save();
@@ -124,6 +187,120 @@ router.post('/submit', optionalAuthMiddleware, evidenceUpload.single('evidence')
       console.error('Failed to notify admins about new response:', notificationError.message);
     }
     res.json({ message: 'Response submitted successfully', response });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.post('/casting', authMiddleware, castingUpload, async (req, res) => {
+  try {
+    if (req.user.role === 'guest') {
+      return res.status(403).json({ message: 'Guest accounts cannot submit casting applications' });
+    }
+
+    const user = await User.findById(req.user.id).select('username email');
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    const previous = await Response.findOne({
+      submittedBy: req.user.id,
+      serviceCategory: 'casting_application',
+      status: {
+        $nin: [
+          'rejected',
+          'resolved',
+          'qualified',
+          'unqualified',
+          'contract_released',
+        ],
+      },
+    });
+    if (previous) {
+      return res.status(409).json({
+        message: 'You have already reached the maximum casting application limit',
+        response: previous,
+      });
+    }
+
+    const castingData = parseJsonField(req.body.castingData, {});
+    const identityType = cleanText(castingData.identityType, { maxLength: 32 });
+    const frontFile = req.files?.identityFront?.[0];
+    const backFile = req.files?.identityBack?.[0];
+    const passportFile = req.files?.passport?.[0];
+
+    if (identityType === 'passport') {
+      if (!passportFile) return res.status(400).json({ message: 'Passport image is required' });
+    } else if (!frontFile || !backFile) {
+      return res.status(400).json({ message: 'Front and back identity images are required' });
+    }
+
+    const castingNumber = await nextCastingNumber();
+    const response = new Response({
+      clientName: cleanText(castingData.name || user.username, { maxLength: 120 }),
+      clientEmail: user.email,
+      clientPhoneCountry: cleanText(castingData.country, { maxLength: 120 }),
+      clientPhoneDialCode: cleanText(castingData.phoneDialCode, { maxLength: 12 }),
+      clientPhoneNumber: cleanText(castingData.phoneNumber, { maxLength: 40 }),
+      message: cleanText(castingData.selfDescription || 'Casting application'),
+      serviceCategory: 'casting_application',
+      serviceTitle: 'تقديم للكاستينج',
+      castingNumber,
+      identityFrontUrl: publicUploadUrl(req, frontFile),
+      identityBackUrl: publicUploadUrl(req, backFile),
+      passportUrl: publicUploadUrl(req, passportFile),
+      castingData,
+      submittedBy: req.user.id,
+      actionHistory: [
+        {
+          action: 'created',
+          message: `Casting application submitted with number ${castingNumber}`,
+          createdBy: req.user.id,
+        },
+      ],
+    });
+
+    await response.save();
+    try {
+      await notifyAdminsAboutNewResponse(response);
+    } catch (notificationError) {
+      console.error('Failed to notify admins about casting application:', notificationError.message);
+    }
+
+    res.json({ message: 'Casting application submitted successfully', response });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.patch('/casting/:id', authMiddleware, castingUpload, async (req, res) => {
+  try {
+    const response = await Response.findById(req.params.id);
+    if (!response || response.serviceCategory !== 'casting_application') {
+      return res.status(404).json({ message: 'Casting application not found' });
+    }
+    if (String(response.submittedBy) !== String(req.user.id) && req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    const castingData = parseJsonField(req.body.castingData, response.castingData || {});
+    response.castingData = castingData;
+    response.clientName = cleanText(castingData.name || response.clientName, { maxLength: 120 });
+    response.clientPhoneCountry = cleanText(castingData.country || response.clientPhoneCountry, { maxLength: 120 });
+    response.clientPhoneDialCode = cleanText(castingData.phoneDialCode || response.clientPhoneDialCode, { maxLength: 12 });
+    response.clientPhoneNumber = cleanText(castingData.phoneNumber || response.clientPhoneNumber, { maxLength: 40 });
+    response.message = cleanText(castingData.selfDescription || response.message);
+    response.identityFrontUrl = publicUploadUrl(req, req.files?.identityFront?.[0]) || response.identityFrontUrl;
+    response.identityBackUrl = publicUploadUrl(req, req.files?.identityBack?.[0]) || response.identityBackUrl;
+    response.passportUrl = publicUploadUrl(req, req.files?.passport?.[0]) || response.passportUrl;
+    response.editRequested = false;
+    if (response.status === 'needs_edit') response.status = 'pending';
+    response.actionHistory.push({
+      action: 'updated',
+      message: 'Casting application updated',
+      createdBy: req.user.id,
+    });
+
+    await response.save();
+    res.json({ message: 'Casting application updated successfully', response });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -180,14 +357,34 @@ router.get('/mine', authMiddleware, async (req, res) => {
 router.post('/status/:id', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const { status } = req.body;
-    const allowed = ['pending', 'approved', 'rejected', 'replied', 'resolved'];
+    const allowed = [
+      'pending',
+      'approved',
+      'rejected',
+      'replied',
+      'resolved',
+      'needs_edit',
+      'qualified',
+      'unqualified',
+      'contract_released',
+    ];
     if (!allowed.includes(status)) {
       return res.status(400).json({ message: 'Invalid status' });
     }
 
     const response = await Response.findByIdAndUpdate(
       req.params.id,
-      { status },
+      {
+        status,
+        editRequested: status === 'needs_edit',
+        $push: {
+          actionHistory: {
+            action: `status_${status}`,
+            message: cleanText(req.body.message, { maxLength: 1000 }) || `Status changed to ${status}`,
+            createdBy: req.user.id,
+          },
+        },
+      },
       { new: true }
     );
 
@@ -202,6 +399,123 @@ router.post('/status/:id', authMiddleware, adminMiddleware, async (req, res) => 
     }
 
     res.json({ message: 'Status updated successfully', response });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.post('/casting/:id/appointment', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const appointmentAt = new Date(req.body.appointmentAt);
+    if (Number.isNaN(appointmentAt.getTime())) {
+      return res.status(400).json({ message: 'Invalid appointment date' });
+    }
+
+    const response = await Response.findByIdAndUpdate(
+      req.params.id,
+      {
+        appointmentAt,
+        status: 'approved',
+        editRequested: false,
+        $push: {
+          actionHistory: {
+            action: 'appointment_scheduled',
+            message: cleanText(req.body.message, { maxLength: 1000 }) || `Appointment scheduled at ${formatRiyadhDateTime(appointmentAt)}`,
+            createdBy: req.user.id,
+          },
+        },
+      },
+      { new: true }
+    );
+
+    if (!response || response.serviceCategory !== 'casting_application') {
+      return res.status(404).json({ message: 'Casting application not found' });
+    }
+
+    try {
+      await notifyClientAboutStatus(response, 'approved', req.user.id);
+    } catch (notificationError) {
+      console.error('Failed to notify client about casting appointment:', notificationError.message);
+    }
+
+    res.json({ message: 'Appointment scheduled successfully', response });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.post('/casting/:id/result', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const result = cleanText(req.body.result, { maxLength: 32 });
+    if (!['qualified', 'unqualified'].includes(result)) {
+      return res.status(400).json({ message: 'Invalid casting result' });
+    }
+
+    const note = cleanText(req.body.note, { maxLength: 1000 });
+    const response = await Response.findByIdAndUpdate(
+      req.params.id,
+      {
+        status: result,
+        editRequested: false,
+        $push: {
+          actionHistory: {
+            action: `interview_${result}`,
+            message: note || (result === 'qualified'
+              ? 'Interview result: qualified'
+              : 'Interview result: unqualified'),
+            createdBy: req.user.id,
+          },
+        },
+      },
+      { new: true }
+    );
+
+    if (!response || response.serviceCategory !== 'casting_application') {
+      return res.status(404).json({ message: 'Casting application not found' });
+    }
+
+    try {
+      await notifyClientAboutCastingResult(response, result, req.user.id, note);
+    } catch (notificationError) {
+      console.error('Failed to notify client about casting result:', notificationError.message);
+    }
+
+    res.json({ message: 'Casting result updated successfully', response });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.post('/casting/:id/release-contract', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const note = cleanText(req.body.note, { maxLength: 1000 });
+    const response = await Response.findByIdAndUpdate(
+      req.params.id,
+      {
+        status: 'contract_released',
+        editRequested: false,
+        $push: {
+          actionHistory: {
+            action: 'contract_released',
+            message: note || 'Casting contract released',
+            createdBy: req.user.id,
+          },
+        },
+      },
+      { new: true }
+    );
+
+    if (!response || response.serviceCategory !== 'casting_application') {
+      return res.status(404).json({ message: 'Casting application not found' });
+    }
+
+    try {
+      await notifyClientAboutContractRelease(response, req.user.id, note);
+    } catch (notificationError) {
+      console.error('Failed to notify client about contract release:', notificationError.message);
+    }
+
+    res.json({ message: 'Casting contract released successfully', response });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

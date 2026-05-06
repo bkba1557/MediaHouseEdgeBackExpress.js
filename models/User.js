@@ -60,6 +60,11 @@ const UserSchema = new mongoose.Schema({
     enum: ['regular', 'vip', 'key_account'],
     default: 'regular',
   },
+  accountType: {
+    type: String,
+    enum: ['client', 'casting'],
+    default: 'client',
+  },
   fcmTokens: {
     type: [DeviceTokenSchema],
     default: [],

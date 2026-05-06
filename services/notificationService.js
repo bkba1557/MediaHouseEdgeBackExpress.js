@@ -39,7 +39,52 @@ function getMailTransporter() {
   });
 }
 
-async function sendEmail({ to, subject, text }) {
+function formatRiyadhDateTime(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Riyadh',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(date);
+  const part = (type) => parts.find((item) => item.type === type)?.value || '';
+  return `${part('year')}-${part('month')}-${part('day')} ${part('hour')}:${part('minute')} توقيت الرياض`;
+}
+
+function buildBilingualEmailHtml({ titleAr, titleEn, bodyAr, bodyEn, details = [] }) {
+  const rows = details
+    .filter((item) => item && (item.value || item.value === 0))
+    .map((item) => `
+      <tr>
+        <td style="padding:10px 12px;color:#bbbbbb;border-bottom:1px solid #2a2a2a">${item.labelAr}<br><span style="font-size:12px;color:#888">${item.labelEn}</span></td>
+        <td style="padding:10px 12px;color:#ffffff;border-bottom:1px solid #2a2a2a">${item.value}</td>
+      </tr>`)
+    .join('');
+
+  return `
+  <div style="margin:0;padding:0;background:#050505;color:#fff;font-family:Arial,Tahoma,sans-serif">
+    <div style="max-width:680px;margin:0 auto;padding:28px 18px">
+      <div style="border:1px solid #2a2a2a;border-top:4px solid #e50914;background:#111;border-radius:10px;overflow:hidden">
+        <div style="padding:22px 24px;background:#090909">
+          <h1 style="margin:0;color:#fff;font-size:22px;line-height:1.4">${titleAr}</h1>
+          <p style="margin:6px 0 0;color:#e50914;font-weight:700">${titleEn}</p>
+        </div>
+        <div style="padding:24px;line-height:1.8">
+          <p dir="rtl" style="margin:0 0 14px;text-align:right">${bodyAr}</p>
+          <p style="margin:0 0 18px;color:#d7d7d7">${bodyEn}</p>
+          ${rows ? `<table style="width:100%;border-collapse:collapse;background:#171717;border:1px solid #2a2a2a;border-radius:8px;overflow:hidden">${rows}</table>` : ''}
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+async function sendEmail({ to, subject, text, html }) {
   const recipients = Array.isArray(to)
     ? to.map((value) => cleanText(value, { maxLength: 254 })).filter(Boolean)
     : [cleanText(to, { maxLength: 254 })].filter(Boolean);
@@ -56,6 +101,7 @@ async function sendEmail({ to, subject, text }) {
     to: recipients,
     subject,
     text,
+    html,
   });
 }
 
@@ -256,6 +302,7 @@ async function findUserByResponse(response) {
 async function notifyAdminsAboutNewResponse(response) {
   const admins = await User.find({ role: 'admin' }).select('_id email fcmTokens');
   const isServiceRequest = Boolean(cleanText(response.serviceCategory));
+  const isCasting = response.serviceCategory === 'casting_application';
   const requestLabel = cleanText(
     response.serviceTitle || response.serviceCategory || 'Service request',
     { maxLength: 160 }
@@ -263,7 +310,7 @@ async function notifyAdminsAboutNewResponse(response) {
 
   const result = await createNotificationsForUsers({
     recipientIds: admins.map((user) => user._id),
-    title: isServiceRequest ? 'New service request' : 'New client feedback',
+    title: isCasting ? 'New casting request' : isServiceRequest ? 'New service request' : 'New client feedback',
     body: isServiceRequest
       ? `${cleanText(response.clientName, { maxLength: 80 })} submitted ${requestLabel}.`
       : `${cleanText(response.clientName, { maxLength: 80 })} sent new feedback.`,
@@ -280,7 +327,9 @@ async function notifyAdminsAboutNewResponse(response) {
   if (isServiceRequest) {
     await sendEmail({
       to: admins.map((user) => user.email),
-      subject: 'New Media House Edge service access request',
+      subject: isCasting
+        ? 'New Media House Edge casting application'
+        : 'New Media House Edge service access request',
       text: [
         `${cleanText(response.clientName, { maxLength: 80 })} submitted ${requestLabel}.`,
         `Email: ${cleanText(response.clientEmail, { maxLength: 254 })}`,
@@ -288,6 +337,20 @@ async function notifyAdminsAboutNewResponse(response) {
         `Organization: ${cleanText(response.organizationName, { maxLength: 180 }) || '-'}`,
         `Evidence: ${cleanText(response.evidenceUrl, { maxLength: 2048 }) || '-'}`,
       ].join('\n'),
+      html: buildBilingualEmailHtml({
+        titleAr: isCasting ? 'طلب كاستينج جديد' : 'طلب خدمة جديد',
+        titleEn: isCasting ? 'New Casting Application' : 'New Service Request',
+        bodyAr: `${cleanText(response.clientName, { maxLength: 80 })} قام بإرسال ${requestLabel}.`,
+        bodyEn: `${cleanText(response.clientName, { maxLength: 80 })} submitted ${requestLabel}.`,
+        details: [
+          { labelAr: 'رقم القيد', labelEn: 'Casting Number', value: response.castingNumber },
+          { labelAr: 'البريد', labelEn: 'Email', value: cleanText(response.clientEmail, { maxLength: 254 }) },
+          { labelAr: 'الجوال', labelEn: 'Phone', value: `${cleanText(response.clientPhoneDialCode)} ${cleanText(response.clientPhoneNumber)}`.trim() },
+          { labelAr: 'الدولة', labelEn: 'Country', value: response.castingData?.country || response.clientPhoneCountry },
+          { labelAr: 'نوع الهوية', labelEn: 'ID Type', value: response.castingData?.identityType },
+          { labelAr: 'المرفق', labelEn: 'Attachment', value: cleanText(response.evidenceUrl, { maxLength: 2048 }) || response.identityFrontUrl || response.passportUrl },
+        ],
+      }),
     });
   }
 
@@ -344,12 +407,119 @@ async function notifyClientAboutStatus(response, status, actorId) {
   if (readableStatus === 'approved') {
     await sendEmail({
       to: user.email || response.clientEmail,
-      subject: 'Media House Edge service request approved',
-      text: `${requestLabel} has been approved. You can now access the service content from the app.`,
+      subject: response.serviceCategory === 'casting_application'
+        ? 'Media House Edge casting appointment'
+        : 'Media House Edge service request approved',
+      text: `${requestLabel} has been approved.`,
+      html: buildBilingualEmailHtml({
+        titleAr: 'تحديث على طلبك',
+        titleEn: 'Your request was updated',
+        bodyAr: response.appointmentAt
+          ? `تم قبول طلبك وتحديد موعد المقابلة.`
+          : `تم قبول طلبك.`,
+        bodyEn: response.appointmentAt
+          ? `Your request was approved and an interview appointment was scheduled.`
+          : `Your request was approved.`,
+        details: [
+          { labelAr: 'الطلب', labelEn: 'Request', value: requestLabel },
+          { labelAr: 'رقم القيد', labelEn: 'Casting Number', value: response.castingNumber },
+          { labelAr: 'الحالة', labelEn: 'Status', value: readableStatus },
+          { labelAr: 'الموعد', labelEn: 'Appointment', value: response.appointmentAt ? formatRiyadhDateTime(response.appointmentAt) : '' },
+        ],
+      }),
     });
   }
 
   return result;
+}
+
+async function notifyClientAboutCastingResult(response, result, actorId, note = '') {
+  const user = await findUserByResponse(response);
+  if (!user) return null;
+
+  const isQualified = result === 'qualified';
+  const resultAr = isQualified ? 'مؤهل' : 'غير مؤهل';
+  const resultEn = isQualified ? 'Qualified' : 'Not Qualified';
+  const castingNumber = response.castingNumber || response._id.toString();
+
+  const notification = await createNotificationsForUsers({
+    recipientIds: [user._id],
+    title: isQualified ? 'Casting interview result' : 'Casting interview result',
+    body: isQualified
+      ? `Your casting interview result is qualified.`
+      : `Your casting interview result is not qualified.`,
+    type: 'casting_interview_result',
+    data: {
+      responseId: response._id,
+      castingNumber,
+      result,
+      kind: 'service',
+    },
+    createdBy: actorId,
+  });
+
+  await sendEmail({
+    to: user.email || response.clientEmail,
+    subject: `Media House Edge casting result - ${resultEn}`,
+    text: `Casting request ${castingNumber} result: ${resultEn}`,
+    html: buildBilingualEmailHtml({
+      titleAr: 'نتيجة مقابلة الكاستينج',
+      titleEn: 'Casting Interview Result',
+      bodyAr: isQualified
+        ? 'نود إبلاغكم بأنه تم قبولكم في المقابلة وأنكم مؤهلون.'
+        : 'نود إبلاغكم بنتيجة المقابلة، وحاليا لم يتم تأهيلكم.',
+      bodyEn: isQualified
+        ? 'We are pleased to inform you that your interview result is qualified.'
+        : 'We would like to inform you that your interview result is currently not qualified.',
+      details: [
+        { labelAr: 'رقم القيد', labelEn: 'Casting Number', value: castingNumber },
+        { labelAr: 'النتيجة', labelEn: 'Result', value: `${resultAr} / ${resultEn}` },
+        { labelAr: 'ملاحظة الإدارة', labelEn: 'Admin Note', value: cleanText(note, { maxLength: 1000 }) },
+      ],
+    }),
+  });
+
+  return notification;
+}
+
+async function notifyClientAboutContractRelease(response, actorId, note = '') {
+  const user = await findUserByResponse(response);
+  if (!user) return null;
+
+  const castingNumber = response.castingNumber || response._id.toString();
+  const cleanNote = cleanText(note, { maxLength: 1000 });
+
+  const notification = await createNotificationsForUsers({
+    recipientIds: [user._id],
+    title: 'Casting contract released',
+    body: `The casting contract for ${castingNumber} has been released.`,
+    type: 'casting_contract_released',
+    data: {
+      responseId: response._id,
+      castingNumber,
+      kind: 'service',
+    },
+    createdBy: actorId,
+  });
+
+  await sendEmail({
+    to: user.email || response.clientEmail,
+    subject: 'Media House Edge casting contract released',
+    text: `Casting contract ${castingNumber} has been released.`,
+    html: buildBilingualEmailHtml({
+      titleAr: 'فك تعاقد الكاستينج',
+      titleEn: 'Casting Contract Released',
+      bodyAr: 'نود إبلاغكم بأنه تم فك التعاقد الخاص بطلب الكاستينج.',
+      bodyEn: 'We would like to inform you that the casting contract has been released.',
+      details: [
+        { labelAr: 'رقم القيد', labelEn: 'Casting Number', value: castingNumber },
+        { labelAr: 'التاريخ', labelEn: 'Date', value: formatRiyadhDateTime(new Date()) },
+        { labelAr: 'ملاحظة الإدارة', labelEn: 'Admin Note', value: cleanNote },
+      ],
+    }),
+  });
+
+  return notification;
 }
 
 async function notifyClientAboutContract(response, contract, actorId, action = 'added') {
@@ -420,6 +590,11 @@ module.exports = {
   notifyAdminsAboutNewResponse,
   notifyClientAboutReply,
   notifyClientAboutStatus,
+  notifyClientAboutCastingResult,
+  notifyClientAboutContractRelease,
   notifyClientAboutContract,
   notifyUsersByCriteria,
+  sendEmail,
+  buildBilingualEmailHtml,
+  formatRiyadhDateTime,
 };
